@@ -5,9 +5,11 @@ data series; i.e. battery ID in a header followed by
 
 import csv
 from pathlib import Path
+import time
 
 
 def load_data(filename):
+    print(f"Loading {filename}")
     with open(filename, "r", encoding="utf-8") as fp:
         reader = csv.reader(fp, delimiter=";")
         return list(reader)
@@ -22,7 +24,10 @@ def find_battery_count(data):
         except ValueError:
             # not an int .. meh
             ids[idx] = 0
-    return max(set(ids))
+    max_id = max(set(ids))
+    # -1 because first index is a timestamp
+    print(f"Detected {len(set(ids)) - 1} battery IDs. Highest ID: {max_id}")
+    return max_id
 
 
 def extract_data(data):
@@ -45,30 +50,49 @@ def extract_data(data):
     return batt_data
 
 
-def transpose(matrix, batt_count):
+def transpose(matrix):
     """transpose the matrix, substitute missing with 0"""
     max_len = max([len(v) for _, v in matrix.items()])
-    out = [[0] * batt_count for i in range(max_len + 1)]
+    # len(matrix) + 1 => extra column for timestamp
+    out = [[0] * (len(matrix) + 1) for i in range(max_len + 1)]
+    timestamp = 0
+    out[0][0] = "Timestamp"
+    battery_order = list(matrix.keys())
+    battery_order.sort()
+
     for batt_id, row in matrix.items():
+        batt_column = battery_order.index(batt_id) + 1
         # write the battery ID on the first row
-        out[0][batt_id - 1] = batt_id
+        out[0][batt_column] = batt_id
+
         for idx, value in enumerate(row):
             if value > 100:
                 # handle measurement error
                 value = ""
-            out[idx + 1][batt_id - 1] = value
+            out[idx + 1][batt_column] = value
+
+            # timestamp for first column
+            # update only if there is none
+            if not out[idx + 1][0]:
+                t = time.gmtime(timestamp)
+                out[idx + 1][0] = f"{t.tm_hour:02}:{t.tm_min:02}:{t.tm_sec:02}"
+                timestamp += 10
+
     return out
 
 
 def write_data(data):
     """dump 2D list to file"""
-    with open(Path("batteries", "master.csv"), "w", encoding="utf-8") as fp:
+    target = Path("batteries", "master.csv")
+    print(f"Storing results in {target}")
+    with open(target, "w", encoding="utf-8") as fp:
         writer = csv.writer(fp, delimiter=",", lineterminator="\n")
         writer.writerows(data)
 
 
 data = load_data("battery_log.csv")
 battery_count = find_battery_count(data)
+print("Processing data")
 extracted = extract_data(data)
-output = transpose(extracted, battery_count)
+output = transpose(extracted)
 write_data(output)
